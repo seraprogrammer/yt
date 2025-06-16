@@ -3,11 +3,19 @@ import ytdl from '@distube/ytdl-core';
 
 export async function POST(request: NextRequest) {
   try {
-    const { url } = await request.json();
+    const { url, bitrate = '128' } = await request.json();
 
     if (!url) {
       return NextResponse.json(
         { error: 'URL is required' },
+        { status: 400 }
+      );
+    }
+
+    // Validate bitrate
+    if (!['128', '192'].includes(bitrate)) {
+      return NextResponse.json(
+        { error: 'Invalid bitrate. Only 128 and 192 kbps are supported.' },
         { status: 400 }
       );
     }
@@ -35,16 +43,60 @@ export async function POST(request: NextRequest) {
       // Continue with default title if info extraction fails
     }
 
-    // Download highest quality audio
-    const audioStream = ytdl(url, {
-      quality: 'highestaudio',
-      filter: 'audioonly',
-      requestOptions: {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+    // Get video info to select appropriate audio format
+    let audioStream;
+    try {
+      const info = await ytdl.getInfo(url);
+
+      // Filter audio-only formats and find the best match for the requested bitrate
+      const audioFormats = info.formats
+        .filter(format => format.hasAudio && !format.hasVideo)
+        .filter(format => format.audioBitrate)
+        .sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0));
+
+      let selectedFormat;
+      const targetBitrate = parseInt(bitrate);
+
+      if (targetBitrate === 128) {
+        // For 128 kbps, prefer formats around 128 kbps or lower quality
+        selectedFormat = audioFormats.find(format =>
+          (format.audioBitrate || 0) <= 160 && (format.audioBitrate || 0) >= 96
+        ) || audioFormats.find(format => (format.audioBitrate || 0) <= 128);
+      } else if (targetBitrate === 192) {
+        // For 192 kbps, prefer formats around 192 kbps or higher quality
+        selectedFormat = audioFormats.find(format =>
+          (format.audioBitrate || 0) >= 160 && (format.audioBitrate || 0) <= 256
+        ) || audioFormats.find(format => (format.audioBitrate || 0) >= 192);
       }
-    });
+
+      // Fallback to highest quality if no suitable format found
+      if (!selectedFormat) {
+        selectedFormat = audioFormats[0];
+      }
+
+      console.log(`Selected audio format: ${selectedFormat?.audioBitrate}kbps for requested ${bitrate}kbps`);
+
+      audioStream = ytdl(url, {
+        format: selectedFormat,
+        requestOptions: {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          }
+        }
+      });
+    } catch (formatError) {
+      console.error('Failed to select specific format, falling back to highest audio:', formatError);
+      // Fallback to highest quality audio
+      audioStream = ytdl(url, {
+        quality: 'highestaudio',
+        filter: 'audioonly',
+        requestOptions: {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          }
+        }
+      });
+    }
 
     // Collect audio data
     const chunks: Buffer[] = [];
@@ -61,6 +113,7 @@ export async function POST(request: NextRequest) {
         'Content-Disposition': `attachment; filename="${encodeURIComponent(title)}.m4a"`,
         'Content-Length': audioBuffer.length.toString(),
         'X-Video-Title': title, // Pass title for client-side use
+        'X-Bitrate': bitrate, // Pass selected bitrate for client-side use
       },
     });
 

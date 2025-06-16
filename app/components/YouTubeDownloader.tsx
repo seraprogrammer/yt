@@ -21,10 +21,13 @@ interface VideoInfo {
   thumbnail: string;
 }
 
+type BitrateOption = '128' | '192';
+
 export default function YouTubeDownloader() {
   const [url, setUrl] = useState('');
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [isLoadingInfo, setIsLoadingInfo] = useState(false);
+  const [selectedBitrate, setSelectedBitrate] = useState<BitrateOption>('128');
   const [downloadState, setDownloadState] = useState<DownloadState>({
     isDownloading: false,
     progress: 0,
@@ -150,7 +153,7 @@ export default function YouTubeDownloader() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, bitrate: selectedBitrate }),
       });
 
       if (!response.ok) {
@@ -240,6 +243,43 @@ export default function YouTubeDownloader() {
             className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
             disabled={downloadState.isDownloading}
           />
+        </div>
+
+        {/* Bitrate Selection */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            অডিও মান (বিটরেট)
+          </label>
+          <div className="flex gap-4">
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="radio"
+                name="bitrate"
+                value="128"
+                checked={selectedBitrate === '128'}
+                onChange={(e) => setSelectedBitrate(e.target.value as BitrateOption)}
+                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                disabled={downloadState.isDownloading}
+              />
+              <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                128 kbps (স্ট্যান্ডার্ড মান)
+              </span>
+            </label>
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="radio"
+                name="bitrate"
+                value="192"
+                checked={selectedBitrate === '192'}
+                onChange={(e) => setSelectedBitrate(e.target.value as BitrateOption)}
+                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                disabled={downloadState.isDownloading}
+              />
+              <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                192 kbps (উচ্চ মান)
+              </span>
+            </label>
+          </div>
         </div>
 
         {/* Video Info Preview */}
@@ -332,7 +372,7 @@ export default function YouTubeDownloader() {
             ) : (
               <>
                 <Download className="w-5 h-5" />
-                MP3 ডাউনলোড
+                MP3 ডাউনলোড ({selectedBitrate} kbps)
               </>
             )}
           </button>
@@ -373,8 +413,9 @@ export default function YouTubeDownloader() {
         <ol className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
           <li>১. একটি ইউটিউব ভিডিও লিংক কপি করুন</li>
           <li>২. উপরের ইনপুট ফিল্ডে পেস্ট করুন - ভিডিও তথ্য স্বয়ংক্রিয়ভাবে লোড হবে</li>
-          <li>৩. MP3 ডাউনলোড বাটনে ক্লিক করুন</li>
-          <li>৪. ডাউনলোড শেষ হওয়া পর্যন্ত অপেক্ষা করুন</li>
+          <li>৩. পছন্দের অডিও মান নির্বাচন করুন (128 kbps বা 192 kbps)</li>
+          <li>৪. MP3 ডাউনলোড বাটনে ক্লিক করুন</li>
+          <li>৫. ডাউনলোড শেষ হওয়া পর্যন্ত অপেক্ষা করুন</li>
         </ol>
       </div>
     </div>
