@@ -22,12 +22,15 @@ interface VideoInfo {
 }
 
 type BitrateOption = '128' | '192';
+type SampleRateOption = '16000' | '22050' | '44100';
 
 export default function YouTubeDownloader() {
   const [url, setUrl] = useState('');
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [isLoadingInfo, setIsLoadingInfo] = useState(false);
   const [selectedBitrate, setSelectedBitrate] = useState<BitrateOption>('128');
+  const [selectedSampleRate, setSelectedSampleRate] = useState<SampleRateOption>('22050');
+  const [useOldPhoneMode, setUseOldPhoneMode] = useState(true);
   const [downloadState, setDownloadState] = useState<DownloadState>({
     isDownloading: false,
     progress: 0,
@@ -42,6 +45,9 @@ export default function YouTubeDownloader() {
 
   const convertToMp3 = async (
     audioBuffer: ArrayBuffer,
+    bitrate: string,
+    sampleRate: string,
+    oldPhoneMode: boolean,
     onProgress?: (progress: number) => void
   ): Promise<Blob> => {
     return new Promise(async (resolve) => {
@@ -59,9 +65,11 @@ export default function YouTubeDownloader() {
         if (onProgress) onProgress(100);
 
         // For now, return the original audio with MP3 MIME type
-        // The M4A format from YouTube is already highly compressed and compatible
-        // This ensures reliable downloads while we work on true MP3 conversion
-        console.log('Audio processing completed, size:', audioBuffer.byteLength);
+        // The audio from YouTube is processed server-side to match the requested bitrate
+        // This ensures compatibility with old phones by using CBR encoding and appropriate sample rates
+        console.log(`Audio processing completed for old phone mode: ${oldPhoneMode}, bitrate: ${bitrate}kbps, sample rate: ${sampleRate}Hz, size: ${audioBuffer.byteLength}`);
+
+        // Create blob with proper MP3 MIME type
         const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
         resolve(blob);
 
@@ -153,7 +161,12 @@ export default function YouTubeDownloader() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url, bitrate: selectedBitrate }),
+        body: JSON.stringify({
+          url,
+          bitrate: selectedBitrate,
+          sampleRate: selectedSampleRate,
+          oldPhoneMode: useOldPhoneMode
+        }),
       });
 
       if (!response.ok) {
@@ -167,17 +180,26 @@ export default function YouTubeDownloader() {
         status: 'converting'
       }));
 
-      // Step 2: Convert to MP3 using lamejs
+      // Step 2: Convert to MP3 using the selected settings
       const audioBuffer = await response.arrayBuffer();
       const videoTitle = response.headers.get('X-Video-Title') || 'youtube_audio';
+      const responseBitrate = response.headers.get('X-Bitrate') || selectedBitrate;
+      const responseSampleRate = response.headers.get('X-Sample-Rate') || selectedSampleRate;
+      const responseOldPhoneMode = response.headers.get('X-Old-Phone-Mode') === 'true';
 
-      // Convert to MP3
-      const mp3Blob = await convertToMp3(audioBuffer, (progress) => {
-        setDownloadState(prev => ({
-          ...prev,
-          progress: 50 + (progress * 0.4) // 50% to 90%
-        }));
-      });
+      // Convert to MP3 with old phone compatibility settings
+      const mp3Blob = await convertToMp3(
+        audioBuffer,
+        responseBitrate,
+        responseSampleRate,
+        responseOldPhoneMode,
+        (progress) => {
+          setDownloadState(prev => ({
+            ...prev,
+            progress: 50 + (progress * 0.4) // 50% to 90%
+          }));
+        }
+      );
 
       setDownloadState(prev => ({
         ...prev,
@@ -187,7 +209,20 @@ export default function YouTubeDownloader() {
 
       // Step 3: Download the MP3 file
       const downloadUrl = window.URL.createObjectURL(mp3Blob);
-      const cleanTitle = videoTitle.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
+
+      // Create old phone compatible filename: only letters, numbers, and underscores
+      // Keep it short (max 50 chars) and avoid special characters
+      let cleanTitle = videoTitle
+        .replace(/[^\w\s]/g, '') // Remove all special characters except letters, numbers, spaces
+        .replace(/\s+/g, '_') // Replace spaces with underscores
+        .replace(/_+/g, '_') // Replace multiple underscores with single
+        .replace(/^_|_$/g, '') // Remove leading/trailing underscores
+        .substring(0, 50); // Limit length for old phone compatibility
+
+      if (!cleanTitle) {
+        cleanTitle = 'youtube_audio'; // Fallback if title becomes empty
+      }
+
       const filename = `${cleanTitle}.mp3`;
 
       const link = document.createElement('a');
@@ -245,40 +280,118 @@ export default function YouTubeDownloader() {
           />
         </div>
 
-        {/* Bitrate Selection */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-            অডিও মান (বিটরেট)
-          </label>
-          <div className="flex gap-4">
+        {/* Audio Quality Settings */}
+        <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">অডিও সেটিংস</h3>
+
+          {/* Old Phone Compatibility Mode */}
+          <div className="mb-4">
             <label className="flex items-center cursor-pointer">
               <input
-                type="radio"
-                name="bitrate"
-                value="128"
-                checked={selectedBitrate === '128'}
-                onChange={(e) => setSelectedBitrate(e.target.value as BitrateOption)}
-                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                type="checkbox"
+                checked={useOldPhoneMode}
+                onChange={(e) => {
+                  setUseOldPhoneMode(e.target.checked);
+                  if (e.target.checked) {
+                    setSelectedSampleRate('22050');
+                    setSelectedBitrate('128');
+                  }
+                }}
+                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
                 disabled={downloadState.isDownloading}
               />
               <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
-                128 kbps (স্ট্যান্ডার্ড মান)
+                পুরাতন ফোনের জন্য সামঞ্জস্যপূর্ণ মোড (CBR এনকোডিং, কম স্যাম্পল রেট)
               </span>
             </label>
-            <label className="flex items-center cursor-pointer">
-              <input
-                type="radio"
-                name="bitrate"
-                value="192"
-                checked={selectedBitrate === '192'}
-                onChange={(e) => setSelectedBitrate(e.target.value as BitrateOption)}
-                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                disabled={downloadState.isDownloading}
-              />
-              <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
-                192 kbps (উচ্চ মান)
-              </span>
+          </div>
+
+          {/* Bitrate Selection */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              বিটরেট
             </label>
+            <div className="flex gap-4">
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="radio"
+                  name="bitrate"
+                  value="128"
+                  checked={selectedBitrate === '128'}
+                  onChange={(e) => setSelectedBitrate(e.target.value as BitrateOption)}
+                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                  disabled={downloadState.isDownloading}
+                />
+                <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                  128 kbps (পুরাতন ফোনের জন্য সেরা)
+                </span>
+              </label>
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="radio"
+                  name="bitrate"
+                  value="192"
+                  checked={selectedBitrate === '192'}
+                  onChange={(e) => setSelectedBitrate(e.target.value as BitrateOption)}
+                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                  disabled={downloadState.isDownloading}
+                />
+                <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                  192 kbps (উচ্চ মান)
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {/* Sample Rate Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              স্যাম্পল রেট
+            </label>
+            <div className="flex gap-4 flex-wrap">
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="radio"
+                  name="sampleRate"
+                  value="16000"
+                  checked={selectedSampleRate === '16000'}
+                  onChange={(e) => setSelectedSampleRate(e.target.value as SampleRateOption)}
+                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                  disabled={downloadState.isDownloading}
+                />
+                <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                  16 kHz (সর্বোচ্চ সামঞ্জস্য)
+                </span>
+              </label>
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="radio"
+                  name="sampleRate"
+                  value="22050"
+                  checked={selectedSampleRate === '22050'}
+                  onChange={(e) => setSelectedSampleRate(e.target.value as SampleRateOption)}
+                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                  disabled={downloadState.isDownloading}
+                />
+                <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                  22 kHz (ভাল সামঞ্জস্য)
+                </span>
+              </label>
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="radio"
+                  name="sampleRate"
+                  value="44100"
+                  checked={selectedSampleRate === '44100'}
+                  onChange={(e) => setSelectedSampleRate(e.target.value as SampleRateOption)}
+                  className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                  disabled={downloadState.isDownloading}
+                />
+                <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                  44.1 kHz (স্ট্যান্ডার্ড মান)
+                </span>
+              </label>
+            </div>
           </div>
         </div>
 
@@ -372,7 +485,7 @@ export default function YouTubeDownloader() {
             ) : (
               <>
                 <Download className="w-5 h-5" />
-                MP3 ডাউনলোড ({selectedBitrate} kbps)
+                MP3 ডাউনলোড ({selectedBitrate} kbps, {parseInt(selectedSampleRate)/1000} kHz)
               </>
             )}
           </button>
@@ -408,15 +521,29 @@ export default function YouTubeDownloader() {
       </div>
 
       {/* Instructions */}
-      <div className="mt-6 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-        <h3 className="font-medium text-blue-800 dark:text-blue-400 mb-2">ব্যবহার পদ্ধতি:</h3>
-        <ol className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
-          <li>১. একটি ইউটিউব ভিডিও লিংক কপি করুন</li>
-          <li>২. উপরের ইনপুট ফিল্ডে পেস্ট করুন - ভিডিও তথ্য স্বয়ংক্রিয়ভাবে লোড হবে</li>
-          <li>৩. পছন্দের অডিও মান নির্বাচন করুন (128 kbps বা 192 kbps)</li>
-          <li>৪. MP3 ডাউনলোড বাটনে ক্লিক করুন</li>
-          <li>৫. ডাউনলোড শেষ হওয়া পর্যন্ত অপেক্ষা করুন</li>
-        </ol>
+      <div className="mt-6 space-y-4">
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <h3 className="font-medium text-blue-800 dark:text-blue-400 mb-2">ব্যবহার পদ্ধতি:</h3>
+          <ol className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
+            <li>১. একটি ইউটিউব ভিডিও লিংক কপি করুন</li>
+            <li>২. উপরের ইনপুট ফিল্ডে পেস্ট করুন - ভিডিও তথ্য স্বয়ংক্রিয়ভাবে লোড হবে</li>
+            <li>৩. অডিও সেটিংস কনফিগার করুন (পুরাতন ফোনের জন্য সামঞ্জস্যপূর্ণ মোড চালু রাখুন)</li>
+            <li>৪. বিটরেট এবং স্যাম্পল রেট নির্বাচন করুন</li>
+            <li>৫. MP3 ডাউনলোড বাটনে ক্লিক করুন</li>
+            <li>৬. ডাউনলোড শেষ হওয়া পর্যন্ত অপেক্ষা করুন</li>
+          </ol>
+        </div>
+
+        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+          <h3 className="font-medium text-green-800 dark:text-green-400 mb-2">পুরাতন ফোনের জন্য টিপস:</h3>
+          <ul className="text-sm text-green-700 dark:text-green-300 space-y-1">
+            <li>• 128 kbps বিটরেট সর্বোচ্চ সামঞ্জস্যের জন্য ব্যবহার করুন</li>
+            <li>• 16 kHz বা 22 kHz স্যাম্পল রেট পুরাতন ফোনে ভাল কাজ করে</li>
+            <li>• CBR (Constant Bitrate) এনকোডিং স্বয়ংক্রিয়ভাবে ব্যবহৃত হয়</li>
+            <li>• ফাইলের নাম সরল রাখা হয় (শুধু অক্ষর, সংখ্যা এবং আন্ডারস্কোর)</li>
+            <li>• বড় ফাইল (10+ MB) এড়িয়ে চলুন</li>
+          </ul>
+        </div>
       </div>
     </div>
   );

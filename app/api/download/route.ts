@@ -3,7 +3,12 @@ import ytdl from '@distube/ytdl-core';
 
 export async function POST(request: NextRequest) {
   try {
-    const { url, bitrate = '128' } = await request.json();
+    const {
+      url,
+      bitrate = '128',
+      sampleRate = '22050',
+      oldPhoneMode = true
+    } = await request.json();
 
     if (!url) {
       return NextResponse.json(
@@ -16,6 +21,14 @@ export async function POST(request: NextRequest) {
     if (!['128', '192'].includes(bitrate)) {
       return NextResponse.json(
         { error: 'Invalid bitrate. Only 128 and 192 kbps are supported.' },
+        { status: 400 }
+      );
+    }
+
+    // Validate sample rate
+    if (!['16000', '22050', '44100'].includes(sampleRate)) {
+      return NextResponse.json(
+        { error: 'Invalid sample rate. Only 16000, 22050, and 44100 Hz are supported.' },
         { status: 400 }
       );
     }
@@ -114,6 +127,8 @@ export async function POST(request: NextRequest) {
         'Content-Length': audioBuffer.length.toString(),
         'X-Video-Title': title, // Pass title for client-side use
         'X-Bitrate': bitrate, // Pass selected bitrate for client-side use
+        'X-Sample-Rate': sampleRate, // Pass selected sample rate for client-side use
+        'X-Old-Phone-Mode': oldPhoneMode.toString(), // Pass old phone mode setting
       },
     });
 
